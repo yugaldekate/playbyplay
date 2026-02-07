@@ -16,43 +16,42 @@ function broadcastToAll(wss, payload) {
 }
 
 export function attachWebSocketServer(server) {
-    const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 1024 * 1024 });
+    const wss = new WebSocketServer({ noServer: true, path: '/ws', maxPayload: 1024 * 1024 });
 
-    wss.on('connection', async (socket, req) => {
-        // Apply Arcjet WebSocket protection on connection upgrade
-        server.on('upgrade', async (req, socket, head) => {
-            const { pathname } = new URL(req.url, `http://${req.headers.host}`);
+    server.on('upgrade', async (req, socket, head) => {
+        const { pathname } = new URL(req.url, `http://${req.headers.host}`);
 
-            if (pathname !== '/ws') {
-                return;
-            }
+        if (pathname !== '/ws') {
+            return;
+        }
 
-            if (wsArcjet) {
-                try {
-                    const decision = await wsArcjet.protect(req);
+        if (wsArcjet) {
+            try {
+                const decision = await wsArcjet.protect(req);
 
-                    if (decision.isDenied()) {
-                        if (decision.reason.isRateLimit()) {
-                            socket.write('HTTP/1.1 429 Too Many Requests\r\n\r\n');
-                        } else {
-                            socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
-                        }
-                        socket.destroy();
-                        return;
+                if (decision.isDenied()) {
+                    if (decision.reason.isRateLimit()) {
+                        socket.write('HTTP/1.1 429 Too Many Requests\r\n\r\n');
+                    } else {
+                        socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
                     }
-                } catch (e) {
-                    console.error('WS upgrade protection error', e);
-                    socket.write('HTTP/1.1 500 Internal Server Error\r\n\r\n');
                     socket.destroy();
                     return;
                 }
+            } catch (e) {
+                console.error('WS upgrade protection error', e);
+                socket.write('HTTP/1.1 500 Internal Server Error\r\n\r\n');
+                socket.destroy();
+                return;
             }
+        }
 
-            wss.handleUpgrade(req, socket, head, (ws) => {
-                wss.emit('connection', ws, req);
-            });
+        wss.handleUpgrade(req, socket, head, (ws) => {
+            wss.emit('connection', ws, req);
         });
+    });
 
+    wss.on('connection', async (socket, req) => {
         socket.isAlive = true;
         socket.on('pong', () => { socket.isAlive = true; });
 
